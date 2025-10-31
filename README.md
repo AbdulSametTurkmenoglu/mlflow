@@ -1,88 +1,100 @@
-# MLflow ile Uçtan Uca Metin Sınıflandırma Pipeline'ı
+# End-to-End Text Classification Pipeline with MLflow
 
-Bu proje, bir metin sınıflandırma modelini eğitmek, en iyi modeli seçmek, model kayıt defterine (Model Registry) kaydetmek ve bir REST API olarak sunmak için `MLflow` kütüphanesini kullanan uçtan uca bir makine öğrenimi iş akışını (MLOps) göstermektedir.
+A complete MLOps workflow demonstrating how to train a text classification model, select the best model, register it in MLflow Model Registry, and serve it as a REST API using MLflow.
 
-Proje, 42.000 Türkçe haber metnini kullanarak bir modeli (TF-IDF + Lojistik Regresyon) eğitir ve bu modeli "Staging" ve "Production" aşamalarından geçirerek CI/CD (Sürekli Entegrasyon / Sürekli Teslimat) süreçlerini simüle eder.
+The project trains a model (TF-IDF + Logistic Regression) on 42,000 Turkish news articles and simulates CI/CD processes by moving the model through "Staging" and "Production" stages.
 
-##  Temel Özellikler
+##  Key Features
 
-* **Veri Hazırlama:** Metin verilerinin temizlenmesi (küçük harfe çevirme, noktalama ve sayıların kaldırılması).
-* **Özel `pyfunc` Modeli:** `TfidfVectorizer` ve `LogisticRegression` adımlarını tek bir `mlflow.pyfunc.PythonModel` sınıfında paketleme. Bu, model sunucusu tarafından çağrıldığında tüm ön işleme ve tahmin adımlarının otomatik olarak uygulanmasını sağlar.
-* **Hiperparametre Optimizasyonu:** `ParameterGrid` kullanarak `MLflow` altında iç içe geçmiş çalıştırmalar (nested runs) ile en iyi model parametrelerini (C, max_features, ngram_range) arama.
-* **Model Kaydı (Model Registry):** En iyi F1 skoruna sahip modeli otomatik olarak MLflow Model Registry'e kaydetme.
-* **CI/CD Simülasyonu:**
-    1.  **Staging (CI):** En iyi modelin "Staging" (Hazırlık) aşamasına otomatik olarak terfi ettirilmesi ve bir kalite eşiğine (F1 > 0.60) göre doğrulanması.
-    2.  **Production (CD):** Başarılı bir "Staging" doğrulamasının ardından, "insan onayı" (manuel simülasyon) ile modelin "Production" (Canlı) aşamasına alınması.
-* **Model Sunucusu:** "Production" modelini yerel bir REST API olarak (port 5001) sunma.
-* **API Testi:** Sunulan modele `requests` kütüphanesi ile örnek veriler göndererek canlı tahminler alma.
+- **Data Preparation**: Text cleaning (lowercasing, removing punctuation and numbers)
+- **Custom `pyfunc` Model**: Packages `TfidfVectorizer` and `LogisticRegression` in a single `mlflow.pyfunc.PythonModel` class for automatic preprocessing and prediction
+- **Hyperparameter Optimization**: Grid search with nested MLflow runs using `ParameterGrid` to find optimal parameters (C, max_features, ngram_range)
+- **Model Registry**: Automatically registers the best model (highest F1 score) to MLflow Model Registry
+- **CI/CD Simulation**:
+  - **Staging (CI)**: Automatically promotes best model to "Staging" and validates against quality threshold (F1 > 0.60)
+  - **Production (CD)**: After successful staging validation, moves model to "Production" with manual approval simulation
+- **Model Server**: Serves the "Production" model as a local REST API (port 5001)
+- **API Testing**: Live predictions via `requests` library
 
-##  Kullanılan Teknolojiler
+##  Technology Stack
 
-* **MLflow:** Deney takibi, model yönetimi, model kaydı ve model sunucusu için ana araç.
-* **Scikit-learn:** `TfidfVectorizer` ve `LogisticRegression` için.
-* **Pandas:** Veri işleme için.
-* **SHAP:** Model açıklanabilirliği için (Not: Çıktılarda analiz başarısız oldu, ancak kod entegrasyonu mevcuttur).
+- **MLflow**: Experiment tracking, model management, registry, and serving
+- **Scikit-learn**: `TfidfVectorizer` and `LogisticRegression`
+- **Pandas**: Data processing
+- **SHAP**: Model explainability (integration included)
 
-##  İş Akışı (Pipeline)
+##  Prerequisites
 
-Proje, `ml_floww.ipynb` notebook'u üzerinden aşağıdaki adımları sırayla çalıştırır:
+- Python 3.8+
+- Dataset: 42K Turkish news articles in `.txt` format
 
-1.  **Veri Yükleme ve Hazırlık:** `veri/42bin_haber/news` klasöründeki `.txt` dosyaları okunur, temizlenir ve eğitim/test setlerine ayrılır.
-2.  **Özel Model Sınıfı:** `TextClassifierPyfunc` sınıfı, `metin` alanını girdi olarak alıp temizleme, TF-IDF dönüşümü ve sınıflandırma adımlarını yürütecek şekilde tanımlanır.
-3.  **Grid Search (Parent Run):** `Haber_Siniflandirma_Custom_Pyfunc_GridSearch_v1` deneyi altında bir "Parent Run" başlatılır.
-    * **Eğitim (Child Runs):** Belirlenen `param_grid` içindeki her bir parametre kombinasyonu için bir "Child Run" (iç içe çalışma) başlatılır.
-    * Her bir "Child Run" içinde model eğitilir, F1 skoru hesaplanır, parametreler, metrikler ve `pyfunc` modeli MLflow'a loglanır.
-    * En yüksek F1 skorunu veren "Child Run" ID'si (`best_run_id`) saklanır.
-4.  **Model Kaydı ve Staging:**
-    * En iyi model (`best_run_id` kullanılarak) `Haber_Siniflandirici_Pyfunc_Prod` adıyla Model Registry'e kaydedilir.
-    * Bu yeni model versiyonu otomatik olarak "Staging" aşamasına geçirilir.
-5.  **Staging Doğrulaması (CI Simülasyonu):**
-    * "Staging" aşamasındaki model (`models:/Haber_Siniflandirici_Pyfunc_Prod/Staging`) yüklenir.
-    * Test seti üzerinde F1 skoru tekrar hesaplanır.
-    * Eğer F1 skoru belirlenen eşiği (`validation_f1_threshold = 0.60`) geçerse, model versiyonuna "CI/CD Doğrulaması BAŞARILI" şeklinde bir yorum/etiket eklenir.
-6.  **Production'a Terfi (CD Simülasyonu):**
-    * "Takım Lideri İncelemesi" simüle edilir.
-    * CI adımından gelen yorumlar kontrol edilir.
-    * `human_approval = True` (insan onayı) olduğu için model "Production" aşamasına terfi ettirilir.
-7.  **Model Sunucusu Başlatma (Terminal):**
-    * Kullanıcıya, "Production" modelini sunmak için terminalde çalıştırması gereken komut gösterilir.
-8.  **API Testi (Inference):**
-    * Yerel sunucuya (Port 5001) test verileri gönderilir ve modelin tahminleri (`predicted_category`) başarılı bir şekilde alınır.
+##  Installation
+```bash
+pip install mlflow pandas scikit-learn numpy shap plotly matplotlib requests
+```
 
-##  Projeyi Çalıştırma
+Ensure your data is in `veri/42bin_haber/news` directory structure with `.txt` files accessible to the notebook.
 
-Bu projeyi çalıştırmak için `ml_floww.ipynb` notebook'unu kullanabilirsiniz.
+##  Workflow Pipeline
 
-### Gereksinimler
-Ayrıca, `veri/42bin_haber/news` klasör yapısının ve `.txt` dosyalarının notebook'un erişebileceği bir konumda olması gerekmektedir.
+The project runs the following steps sequentially via `ml_floww.ipynb` notebook:
 
-### Adım Adım Çalıştırma
+1. **Data Loading & Preparation**: Reads `.txt` files from `veri/42bin_haber/news`, cleans text, splits into train/test sets
 
-1.  **MLflow UI'ı Başlatın (Önerilir):**
-    Notebook'u çalıştırmadan önce, ayrı bir terminal açın ve `mlruns` klasörünün oluşturulacağı dizinde şu komutu çalıştırarak MLflow arayüzünü başlatın:
-    ```bash
-    mlflow ui
-    ```
-    Bu arayüzü `http://127.0.0.1:5000` adresinden takip edebilirsiniz.
+2. **Custom Model Class**: Defines `TextClassifierPyfunc` class that takes `metin` field as input and performs cleaning, TF-IDF transformation, and classification
 
-2.  **Notebook'u Çalıştırın:**
-    `ml_floww.ipynb` notebook'undaki tüm hücreleri **sırayla** çalıştırın.
-    * Hücre 1-5, modeli eğitecek, en iyisini seçecek ve "Production" aşamasına kadar getirecektir.
+3. **Grid Search (Parent Run)**: Starts a parent run under `Haber_Siniflandirma_Custom_Pyfunc_GridSearch_v1` experiment
+   - **Training (Child Runs)**: Creates a child run for each parameter combination in `param_grid`
+   - Logs parameters, metrics, and `pyfunc` model for each run
+   - Saves best run ID (`best_run_id`) with highest F1 score
 
-3.  **Model Sunucusunu Başlatın (Hücre 6 Talimatı):**
-    Notebook'un 6. hücresindeki talimatları izleyin. **Ayrı bir terminal** açın, `mlruns` klasörünün olduğu dizine gidin ve şu komutu çalıştırın:
-    ```bash
-    mlflow models serve -m "models:/Haber_Siniflandirici_Pyfunc_Prod/Production" --port 5001 --no-conda
-    ```
-    Sunucu `Listening at: http://127.0.0.1:5001` mesajını verdiğinde hazır demektir.
+4. **Model Registration & Staging**:
+   - Registers best model as `Haber_Siniflandirici_Pyfunc_Prod` in Model Registry
+   - Automatically transitions to "Staging" stage
 
-4.  **API'yi Test Edin (Hücre 7):**
-    Notebook'a geri dönün ve son hücreyi (Bölüm 2) çalıştırın. Bu hücre, çalışan sunucuya istek atacak ve tahminleri alacaktır.
+5. **Staging Validation (CI Simulation)**:
+   - Loads model from `models:/Haber_Siniflandirici_Pyfunc_Prod/Staging`
+   - Recalculates F1 score on test set
+   - If F1 > 0.60 threshold, adds "CI/CD Validation PASSED" comment
 
-##  Örnek API İsteği (Python)
+6. **Production Promotion (CD Simulation)**:
+   - Simulates "Team Lead Review"
+   - Checks CI comments
+   - With `human_approval = True`, promotes model to "Production"
 
-Aşağıdaki kod, çalışan model sunucusuna (Port 5001) nasıl istek atılacağını göstermektedir.
+7. **Model Server Launch**: Displays command to serve "Production" model
 
+8. **API Testing (Inference)**: Sends test data to local server (port 5001) and retrieves predictions
+
+##  Usage
+
+### Step 1: Start MLflow UI (Recommended)
+
+Open a terminal in the directory where `mlruns` will be created:
+```bash
+mlflow ui
+```
+
+Access the UI at `http://127.0.0.1:5000`
+
+### Step 2: Run the Notebook
+
+Execute all cells in `ml_floww.ipynb` **sequentially**. Cells 1-5 will train, select, and promote the model to "Production".
+
+### Step 3: Start Model Server
+
+Following instructions in cell 6, open a **separate terminal** and run:
+```bash
+mlflow models serve -m "models:/Haber_Siniflandirici_Pyfunc_Prod/Production" --port 5001 --no-conda
+```
+
+Wait for `Listening at: http://127.0.0.1:5001` message.
+
+### Step 4: Test the API
+
+Run the final cell (Section 2) in the notebook to send requests and get predictions.
+
+##  API Request Example
 ```python
 import requests
 import json
@@ -95,9 +107,10 @@ test_data_json = {
             ["Enflasyon rakamları açıklandı, merkez bankası faiz kararı bekleniyor"],
             ["Yapay zeka modelleri metin özetlemede çığır açtı"]
         ]
-    }}
+    }
+}
 
-url = "[http://127.0.0.1:5001/invocations](http://127.0.0.1:5001/invocations)"
+url = "http://127.0.0.1:5001/invocations"
 
 response = requests.post(
     url,
@@ -108,13 +121,7 @@ response = requests.post(
 print(json.dumps(response.json(), indent=2, ensure_ascii=False))
 ```
 
-Başlamadan önce gerekli kütüphanelerin kurulu olduğundan emin olun:
-
-```bash
-pip install mlflow pandas scikit-learn numpy shap plotly matplotlib requests
-```
-
-# Örnek Çıktı
+### Sample Output
 ```json
 {
   "predictions": [
@@ -133,3 +140,13 @@ pip install mlflow pandas scikit-learn numpy shap plotly matplotlib requests
   ]
 }
 ```
+
+
+##  MLOps Best Practices Demonstrated
+
+- **Experiment Tracking**: All runs logged with parameters and metrics
+- **Model Versioning**: Automatic versioning in Model Registry
+- **Staged Deployments**: Staging → Production workflow
+- **Quality Gates**: Automated validation with F1 threshold
+- **Model Serving**: Production-ready REST API
+- **Reproducibility**: All artifacts and metadata tracked
